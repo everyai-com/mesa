@@ -529,6 +529,75 @@ emit_alu_dot_4x8_as_dp2acc(struct ir3_context *ctx, nir_alu_instr *alu,
    }
 }
 
+/* acc + sudot(a, b), without saturation, using whichever of dp4acc/dp2acc is
+ * available. In the mixed mode a is signed and b is unsigned.
+ */
+static struct ir3_instruction *
+emit_sudot_4x8(struct ir3_context *ctx, struct ir3_instruction *a,
+               struct ir3_instruction *b, struct ir3_instruction *acc)
+{
+   struct ir3_instruction *dot;
+
+   if (ctx->compiler->info->props.has_dp4acc) {
+      dot = ir3_DP4ACC(&ctx->build, a, 0, b, 0, acc, 0);
+      dot->cat3.signedness = IR3_SRC_MIXED;
+      dot->cat3.packed = IR3_SRC_PACKED_LOW;
+      return dot;
+   }
+
+   dot = ir3_DP2ACC(&ctx->build, a, 0, b, 0, acc, 0);
+   dot->cat3.packed = IR3_SRC_PACKED_LOW;
+   dot->cat3.signedness = IR3_SRC_MIXED;
+
+   dot = ir3_DP2ACC(&ctx->build, a, 0, b, 0, dot, 0);
+   dot->cat3.packed = IR3_SRC_PACKED_HIGH;
+   dot->cat3.signedness = IR3_SRC_MIXED;
+
+   return dot;
+}
+
+/* Signed x signed 4x8 dot product for GPUs without a compliant dp4acc, which
+ * only have the unsigned x unsigned and signed x unsigned modes.
+ *
+ * Biasing every byte of b by 128 (an xor with 0x80 per byte) turns it into
+ * the unsigned value b + 128, so:
+ *
+ *    sdot(a, b) = sudot(a, b ^ 0x80808080) - 128 * sum(a)
+ *               = sudot(a, b ^ 0x80808080) - sudot(a, 0x80808080)
+ *
+ * Both partial results are exact in 32 bits (|sudot| <= 4 * 128 * 255), so
+ * the subtraction is exact as well. Without saturation the accumulator can
+ * be folded into the first dot product, since wrapping is allowed there.
+ * With saturation it has to be added last, with a single saturating add,
+ * so that no intermediate value can clamp.
+ *
+ * Keep this in sync with the CPU model in tests/dot_4x8.c.
+ */
+static void
+emit_alu_sdot_4x8_emulated(struct ir3_context *ctx, nir_alu_instr *alu,
+                           struct ir3_instruction **dst,
+                           struct ir3_instruction **src)
+{
+   struct ir3_builder *b = &ctx->build;
+   bool sat = alu->op == nir_op_sdot_4x8_iadd_sat;
+
+   struct ir3_instruction *bias = create_immed(b, 0x80808080);
+   struct ir3_instruction *b_biased = ir3_XOR_B(b, src[1], 0, bias, 0);
+   struct ir3_instruction *correction =
+      emit_sudot_4x8(ctx, src[0], bias, create_immed(b, 0));
+
+   struct ir3_instruction *dot =
+      emit_sudot_4x8(ctx, src[0], b_biased, sat ? create_immed(b, 0) : src[2]);
+   dot = ir3_SUB_U(b, dot, 0, correction, 0);
+
+   if (sat) {
+      dot = ir3_ADD_S(b, dot, 0, src[2], 0);
+      dot->flags |= IR3_INSTR_SAT;
+   }
+
+   dst[0] = dot;
+}
+
 static bool
 all_sat_compatible(struct ir3_instruction *instrs[], unsigned n)
 {
@@ -1127,7 +1196,11 @@ emit_alu(struct ir3_context *ctx, nir_alu_instr *alu)
       struct ir3_instruction *src_rpt0[] = {src[0].rpts[0], src[1].rpts[0],
                                             src[2].rpts[0]};
 
-      if (ctx->compiler->info->props.has_dp4acc) {
+      if ((alu->op == nir_op_sdot_4x8_iadd ||
+           alu->op == nir_op_sdot_4x8_iadd_sat) &&
+          !ctx->compiler->info->props.has_compliant_dp4acc) {
+         emit_alu_sdot_4x8_emulated(ctx, alu, dst.rpts, src_rpt0);
+      } else if (ctx->compiler->info->props.has_dp4acc) {
          emit_alu_dot_4x8_as_dp4acc(ctx, alu, dst.rpts, src_rpt0);
       } else if (ctx->compiler->info->props.has_dp2acc) {
          emit_alu_dot_4x8_as_dp2acc(ctx, alu, dst.rpts, src_rpt0);

@@ -173,3 +173,12 @@ test('ir3_delay_test',
   ),
   suite: ['freedreno'],
 )
+
+test('ir3_dot_4x8_test',
+  executable(
+    'ir3_dot_4x8_test',
+    'tests/dot_4x8.c',
+    link_args: ld_args_build_id,
+  ),
+  suite: ['freedreno'],
+)
