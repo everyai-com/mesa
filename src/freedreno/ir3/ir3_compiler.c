@@ -395,9 +395,9 @@ ir3_compiler_create(struct fd_device *dev, const struct fd_dev_id *dev_id,
             compiler->nir_options.has_udot_4x8_sat = true;
          compiler->nir_options.has_sudot_4x8 =
             compiler->nir_options.has_sudot_4x8_sat = true;
-      }
-
-      if (dev_info->props.has_dp4acc && dev_info->props.has_compliant_dp4acc) {
+         /* Native with a compliant dp4acc, otherwise emulated with two
+          * signed x unsigned dot products, see emit_alu_sdot_4x8_emulated().
+          */
          compiler->nir_options.has_sdot_4x8 =
             compiler->nir_options.has_sdot_4x8_sat = true;
       }
