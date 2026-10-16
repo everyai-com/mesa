@@ -1127,15 +1127,20 @@ tu_get_physical_device_properties_1_3(struct tu_physical_device *pdevice,
    p->maxDescriptorSetUpdateAfterBindInlineUniformBlocks = MAX_INLINE_UBOS;
    p->maxInlineUniformTotalSize = MAX_INLINE_UBOS * MAX_INLINE_UBO_RANGE;
 
+   /* ir3 uses dp4acc or dp2acc for all of the packed 4x8 dot products. On
+    * GPUs without a compliant dp4acc the signed x signed one is emulated
+    * with two signed x unsigned dot products, which is still much cheaper
+    * than unpacking the bytes.
+    */
+   const bool has_dot_4x8 =
+      pdevice->info->props.has_dp2acc || pdevice->info->props.has_dp4acc;
+
    p->integerDotProduct8BitUnsignedAccelerated = false;
    p->integerDotProduct8BitSignedAccelerated = false;
    p->integerDotProduct8BitMixedSignednessAccelerated = false;
-   p->integerDotProduct4x8BitPackedUnsignedAccelerated =
-      pdevice->info->props.has_dp2acc;
-   /* TODO: we should be able to emulate 4x8BitPackedSigned fast enough */
-   p->integerDotProduct4x8BitPackedSignedAccelerated = false;
-   p->integerDotProduct4x8BitPackedMixedSignednessAccelerated =
-      pdevice->info->props.has_dp2acc;
+   p->integerDotProduct4x8BitPackedUnsignedAccelerated = has_dot_4x8;
+   p->integerDotProduct4x8BitPackedSignedAccelerated = has_dot_4x8;
+   p->integerDotProduct4x8BitPackedMixedSignednessAccelerated = has_dot_4x8;
    p->integerDotProduct16BitUnsignedAccelerated = false;
    p->integerDotProduct16BitSignedAccelerated = false;
    p->integerDotProduct16BitMixedSignednessAccelerated = false;
@@ -1149,11 +1154,11 @@ tu_get_physical_device_properties_1_3(struct tu_physical_device *pdevice,
    p->integerDotProductAccumulatingSaturating8BitSignedAccelerated = false;
    p->integerDotProductAccumulatingSaturating8BitMixedSignednessAccelerated = false;
    p->integerDotProductAccumulatingSaturating4x8BitPackedUnsignedAccelerated =
-      pdevice->info->props.has_dp2acc;
-   /* TODO: we should be able to emulate Saturating4x8BitPackedSigned fast enough */
-   p->integerDotProductAccumulatingSaturating4x8BitPackedSignedAccelerated = false;
+      has_dot_4x8;
+   p->integerDotProductAccumulatingSaturating4x8BitPackedSignedAccelerated =
+      has_dot_4x8;
    p->integerDotProductAccumulatingSaturating4x8BitPackedMixedSignednessAccelerated =
-      pdevice->info->props.has_dp2acc;
+      has_dot_4x8;
    p->integerDotProductAccumulatingSaturating16BitUnsignedAccelerated = false;
    p->integerDotProductAccumulatingSaturating16BitSignedAccelerated = false;
    p->integerDotProductAccumulatingSaturating16BitMixedSignednessAccelerated = false;
